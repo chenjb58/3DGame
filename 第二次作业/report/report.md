@@ -210,7 +210,6 @@ public class aroundSun : MonoBehaviour
         neptune.Rotate(new Vector3(0, 1, 1) * 30 * Time.deltaTime);
     }
 }
-
 ```
 
 ### 2. 编程实践
@@ -241,7 +240,7 @@ public class aroundSun : MonoBehaviour
 
 - 请将游戏中对象做成预制,在 GenGameObjects 中创建 长方形、正方形、球 及其色彩代表游戏中的对象。
 
-  ![](./Asset/1.png)
+  ![1569124089070](assets/1569124089070.png)
 
 ### 游戏规则
 
@@ -260,19 +259,424 @@ public class aroundSun : MonoBehaviour
 - Controller：除了刚才说的MyCharacterController、BoatController、CoastController以外，还有更高一层的Controller：**FirstController（场景控制器）**，FirstController控制着这个场景中的所有对象，包括其加载、通信、用户输入。
   **最高层的Controller是Director类**，一个游戏中只能有一个实例，它控制着场景的创建、切换、销毁、游戏暂停、游戏退出等等最高层次的功能。
 
-![](./Asset/2.jpeg)
-
 ### GameModel
-从图上我们可以看出我们需要4个GameModel，分别是：
+- 场景中的所有GameObject就是Model，它们受到Controller的控制，比如说牧师和魔鬼受到MyCharacterController类的控制，船受到BoatController类的控制，河岸受到CoastController类的控制。
+- View就是UserGUI和ClickGUI，它们展示游戏结果，并提供用户交互的渠道（点击物体和按钮）。
+- Controller：除了刚才说的MyCharacterController、BoatController、CoastController以外，还有更高一层的Controller：**FirstController（场景控制器）**，FirstController控制着这个场景中的所有对象，包括其加载、通信、用户输入。
+  **最高层的Controller是Director类**，一个游戏中只能有一个实例，它控制着场景的创建、切换、销毁、游戏暂停、游戏退出等等最高层次的功能。
 
-- moveable：用于控制角色和船的移动。
-- CoastController：用于控制与河岸有关的动作，比如角色上下岸，船的离开和停靠。
-- MyCharacterController：用于控制6个角色的动作，比如上船，上岸等。
-- BoatController：用于控制船的运动以及角色的上下船绑定。
+#### Director类：
 
 ```csharp
+	//导演类，控制全局
+	public class Director : System.Object {
+		private static Director _instance;
+		public SceneController currentSceneController { get; set; }
+
+		public static Director getInstance() {
+			if (_instance == null) {
+				_instance = new Director ();
+			}
+			return _instance;
+		}
+	}
+    //场景控制器
+	public interface SceneController {
+        //加载资源
+		void loadResources ();
+	}
+    //用户动作
+	public interface UserAction {
+		void moveBoat();
+		void characterIsClicked(MyCharacterController characterCtrl);
+		void restart();
+        //void clickrule();
+	}
+```
+
+这个类最多只有一个实例，所以在任何Script中的任何地方通过`Director.getInstance()`都能得到同一个Director对象从而进行全局的操作。
+
+
+
+#### SceneController接口：
+
+```csharp
+    //场景控制器
+	public interface SceneController {
+        //加载资源
+		void loadResources ();
+	}
+```
+
+接口需要有类继承它才能实现其中的函数。这个接口是导演控制场景控制器的渠道。在上面的Director 类中，currentSceneController （FirstController类）就是SceneController的实现，所以Director可以调用SceneController接口中的方法，来实现对场景的控制。
+
+同样UserAction也是一个接口。实现这个接口才能对用户的输入做出反应。主要的函数是移动船、人物被点击和重新开始游戏。
+
+
+
+#### UserGUI
+
+```csharp
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using Com.Mygame;
+
+public class UserGUI : MonoBehaviour {
+	private UserAction action;
+    //status为0表示游戏还在进行，为1表示失败，为2表示获胜
+	public int status = 0;
+	GUIStyle style;
+	GUIStyle buttonStyle;
+
+	void Start() {
+        //实例化，设置字体参数、按钮格式
+		action = Director.getInstance ().currentSceneController as UserAction;
+
+		style = new GUIStyle();
+		style.fontSize = 40;
+		style.alignment = TextAnchor.MiddleCenter;
+
+		buttonStyle = new GUIStyle("button");
+		buttonStyle.fontSize = 30;
+	}
+	void OnGUI() {
+        //失败，创建按钮 
+		if (status == 1) {
+			GUI.Label(new Rect(Screen.width/2-50, Screen.height/2-85, 100, 50), "游戏结束!", style);
+			if (GUI.Button(new Rect(Screen.width/2-70, Screen.height/2, 140, 70), "重新开始", buttonStyle)) {
+				status = 0;
+				action.restart ();
+			}
+		} else if(status == 2) {//获胜，创建按钮
+			GUI.Label(new Rect(Screen.width/2-50, Screen.height/2-85, 100, 50), "您获胜了!", style);
+			if (GUI.Button(new Rect(Screen.width/2-70, Screen.height/2, 140, 70), "重新开始", buttonStyle)) {
+				status = 0;
+				action.restart ();
+			}
+		}
+	}
+}
 
 ```
 
+`UserAction action`实际上是FirstController（最终的控制器类）的对象，它实现了UserAction接口。UserGUI与FirstController打交道，是通过UserAction接口的API以及成员变量status。UserGUI不知道这些API是怎么被实现的，但它知道FirstController类一定有这些方法。ClickGUI也是同样的道理，ClickGUI监测用户点击，并调用SceneController进行响应。UserGUI检测游戏状态，是否结束。
+
+#### Moveable：
+
+```csharp
+   //对象动作
+	/*-----------------------------------Moveable------------------------------------------*/
+	public class Moveable: MonoBehaviour {
+		//移动速度，定为只读
+		readonly float move_speed = 20;
+
+		// change frequently
+		int moving_status;	// 0->不移动, 1->移动到中间位置, 2->移动到目的地
+		Vector3 dest;//目的坐标
+		Vector3 middle;//中间坐标
+
+		void Update() {
+            //从当前位置到目的地先移动到middlle再移动到dest
+			if (moving_status == 1) {
+				transform.position = Vector3.MoveTowards (transform.position, middle, move_speed * Time.deltaTime);
+				if (transform.position == middle) {
+					moving_status = 2;
+				}
+			} else if (moving_status == 2) {
+				transform.position = Vector3.MoveTowards (transform.position, dest, move_speed * Time.deltaTime);
+				if (transform.position == dest) {
+					moving_status = 0;
+				}
+			}
+		}
+        //设置目的地坐标
+		public void setDestination(Vector3 _dest) {
+			dest = _dest;
+			middle = _dest;
+			if (_dest.y == transform.position.y) {	// 平移，说明只是船要移动
+				moving_status = 2;
+			}
+			else if (_dest.y < transform.position.y) {	//目的地y坐标比现在低，说明是从岸上移动到船上
+				middle.y = transform.position.y;
+			} else {								// 目的地y坐标比现在搞，说明是从船上要移动到岸上
+				middle.x = transform.position.x;
+			}
+			moving_status = 1;
+		}
+
+		public void reset() {
+			moving_status = 0;
+		}
+	}
+```
+
+GameObject挂载上Moveable以后，Controller就可以通过`setDestination()`方法轻松地让GameObject移动起来。用middle来保存一个中间位置，让物体先移动到middle，再移动到dest.
 
 
+
+#### MyCharacterController:
+
+```csharp
+  //角色控制器
+	/*-----------------------------------MyCharacterController------------------------------------------*/
+	public class MyCharacterController {
+		readonly GameObject character;
+		readonly Moveable moveableScript;
+		readonly ClickGUI clickGUI;
+		readonly int characterType;	// 0->priest, 1->devil
+
+		// change frequently
+		bool _isOnBoat;
+		CoastController coastController;
+
+
+		public MyCharacterController(string which_character) {
+			//Resource.load()函数路径从Asset/Resource开始
+            //根据传入的参数which_character决定创建priest还是devil
+			if (which_character == "priest") {
+				character = Object.Instantiate (Resources.Load ("Perfabs/Priest", typeof(GameObject)), Vector3.zero, Quaternion.identity, null) as GameObject;
+				characterType = 0;
+			} else {
+				character = Object.Instantiate (Resources.Load ("Perfabs/Devil", typeof(GameObject)), Vector3.zero, Quaternion.identity, null) as GameObject;
+				characterType = 1;
+			}
+            //AddComponent为这个角色对象添加Moveable组件
+			moveableScript = character.AddComponent (typeof(Moveable)) as Moveable;
+            //添加clickGUI组建
+			clickGUI = character.AddComponent (typeof(ClickGUI)) as ClickGUI;
+			clickGUI.setController (this);
+		}
+
+		public void setName(string name) {
+			character.name = name;
+		}
+
+		public void setPosition(Vector3 pos) {
+			character.transform.position = pos;
+		}
+
+        //利用moveable的内容到达目的地
+		public void moveToPosition(Vector3 destination) {
+			moveableScript.setDestination(destination);
+		}
+
+		public int getType() {	// 0->priest, 1->devil
+			return characterType;
+		}
+
+		public string getName() {
+			return character.name;
+		}
+
+        //上船后将当前对象的父亲改为boatCtrl船对象控制器
+		public void getOnBoat(BoatController boatCtrl) {
+			coastController = null;
+			character.transform.parent = boatCtrl.getGameobj().transform;
+			_isOnBoat = true;
+		}
+
+        //上岸后于船解除父子关系
+		public void getOnCoast(CoastController coastCtrl) {
+			coastController = coastCtrl;
+			character.transform.parent = null;
+			_isOnBoat = false;
+		}
+
+		public bool isOnBoat() {
+			return _isOnBoat;
+		}
+
+		public CoastController getCoastController() {
+			return coastController;
+		}
+
+		public void reset() {
+			moveableScript.reset ();
+			coastController = (Director.getInstance ().currentSceneController as FirstController).fromCoast;
+			getOnCoast (coastController);
+			setPosition (coastController.getEmptyPosition ());
+			coastController.getOnCoast (this);
+		}
+```
+
+总的来说这就是一个控制人物动作的类，每`new MyCharacterController()`一次，场景中就会多一个游戏角色。构造函数还将clickGUI挂载到了这个角色上，以监测“鼠标点击角色”的事件。
+
+还定义了一些方法提供给场景控制器来调用。
+
+除此之外还定义了其他两个控制器类，BoatController穿控制器类，CoastController岸控制器类，实现的原理跟MyCharacterController大同小异。
+
+
+
+#### FirstController
+
+```csharp
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using Com.Mygame;
+
+//总控制器
+public class FirstController : MonoBehaviour, SceneController, UserAction {
+
+	readonly Vector3 water_pos = new Vector3(0,0.5F,0);
+
+
+	UserGUI userGUI;//userGUI看是否游戏结束（status变量）
+
+	public CoastController fromCoast; //2个岸控制器
+	public CoastController toCoast;
+	public BoatController boat;//船控制器
+	private MyCharacterController[] characters;//6个角色控制器
+
+	void Awake() {
+        //导演类
+		Director director = Director.getInstance ();
+		director.currentSceneController = this;
+		userGUI = gameObject.AddComponent <UserGUI>() as UserGUI;
+		characters = new MyCharacterController[6];
+		loadResources ();
+	}
+    //实现SceneController接口，加载对象
+    public void loadResources() {
+		GameObject water = Instantiate (Resources.Load ("Perfabs/Water", typeof(GameObject)), water_pos, Quaternion.identity, null) as GameObject;
+		water.name = "water";
+
+		fromCoast = new CoastController ("from");
+		toCoast = new CoastController ("to");
+		boat = new BoatController ();
+        //加载人物
+		loadCharacter ();
+	}
+
+	private void loadCharacter() {
+		for (int i = 0; i < 3; i++) {
+			MyCharacterController cha = new MyCharacterController ("priest");
+			cha.setName("priest" + i);
+			cha.setPosition (fromCoast.getEmptyPosition ());
+			cha.getOnCoast (fromCoast);
+			fromCoast.getOnCoast (cha);
+
+			characters [i] = cha;
+		}
+
+		for (int i = 0; i < 3; i++) {
+			MyCharacterController cha = new MyCharacterController ("devil");
+			cha.setName("devil" + i);
+			cha.setPosition (fromCoast.getEmptyPosition ());
+			cha.getOnCoast (fromCoast);
+			fromCoast.getOnCoast (cha);
+
+			characters [i+3] = cha;
+		}
+	}
+
+    //实现Useraction接口，移动船
+	public void moveBoat() {
+		if (boat.isEmpty ())
+			return;
+		boat.Move ();
+		userGUI.status = check_game_over ();
+	}
+
+    //实现Useraction接口，人物被点击动作
+	public void characterIsClicked(MyCharacterController characterCtrl) {
+        //人物对象在船上，送上岸
+		if (characterCtrl.isOnBoat ()) {
+			CoastController whichCoast;
+			if (boat.get_to_or_from () == -1) { // to->-1; from->1
+				whichCoast = toCoast;
+			} else {
+				whichCoast = fromCoast;
+			}
+            //将人物从船上抹去
+			boat.GetOffBoat (characterCtrl.getName());
+            //移动人物
+			characterCtrl.moveToPosition (whichCoast.getEmptyPosition ());
+            //人物登陆
+			characterCtrl.getOnCoast (whichCoast);
+            //陆地控制器接收
+			whichCoast.getOnCoast (characterCtrl);
+
+		} else {	//人物在岸上								// character on coast
+			CoastController whichCoast = characterCtrl.getCoastController ();
+            //船满载
+			if (boat.getEmptyIndex () == -1) {		// boat is full
+				return;
+			}
+            //点击船对面岸上的人无效
+			if (whichCoast.get_to_or_from () != boat.get_to_or_from ())	// boat is not on the side of character
+				return;
+            //岸控制器释放
+			whichCoast.getOffCoast(characterCtrl.getName());
+            //人物移动
+			characterCtrl.moveToPosition (boat.getEmptyPosition());
+            //上船
+			characterCtrl.getOnBoat (boat);
+            //船控制器接收
+			boat.GetOnBoat (characterCtrl);
+		}
+        //每次点击检查是否结束
+		userGUI.status = check_game_over ();
+	}
+
+    //检查游戏是否结束，失败返回1，成功返回2，还能继续返回0
+	int check_game_over() {	// 0->not finish, 1->lose, 2->win
+		int from_priest = 0;
+		int from_devil = 0;
+		int to_priest = 0;
+		int to_devil = 0;
+        
+		int[] fromCount = fromCoast.getCharacterNum ();
+		from_priest += fromCount[0];
+		from_devil += fromCount[1];
+
+		int[] toCount = toCoast.getCharacterNum ();
+		to_priest += toCount[0];
+		to_devil += toCount[1];
+
+		if (to_priest + to_devil == 6)		// win
+			return 2;
+
+		int[] boatCount = boat.getCharacterNum ();
+		if (boat.get_to_or_from () == -1) {	// boat at toCoast
+			to_priest += boatCount[0];
+			to_devil += boatCount[1];
+		} else {	// boat at fromCoast
+			from_priest += boatCount[0];
+			from_devil += boatCount[1];
+		}
+		if (from_priest < from_devil && from_priest > 0) {		// lose
+			return 1;
+		}
+		if (to_priest < to_devil && to_priest > 0) {
+			return 1;
+		}
+		return 0;			// not finish
+	}
+    //重置
+	public void restart() {
+		boat.reset ();
+		fromCoast.reset ();
+		toCoast.reset ();
+		for (int i = 0; i < characters.Length; i++) {
+			characters [i].reset ();
+		}
+	}
+}
+
+```
+
+这个类继承了MonoBehaviour, SceneController, UserAction 三个类，并实现其中的接口函数，是挂在到空Object上面的script。
+
+
+
+### 总结
+
+看懂这份代码其实不难，但是自己做起来发现有很多细节要处理，比如空位置的选取、移动的路线、状态的改变，规则的处理等。
+
+-----
+
+参考了老师给的博客：[学习Unity(5)小游戏实例——牧师与魔鬼](https://www.jianshu.com/p/07028b3da573)
+
+因为太菜只能照着打然后理解。。。
